@@ -39,6 +39,40 @@ public class StringSet : ISet<string>
 public class CollectionTests
 {
     [Test]
+    [Arguments(typeof(List<int>), false)]
+    [Arguments(typeof(List<string>), false)]
+    [Arguments(typeof(Queue<int>), false)]
+    [Arguments(typeof(Stack<int>), false)]
+    [Arguments(typeof(int[]), false)]
+    [Arguments(typeof(List<object>), true)]
+    [Arguments(typeof(Dictionary<int, int>), true)]
+    [Arguments(typeof(ConcurrentDictionary<string, DateTime?>), true)]
+    [Arguments(typeof(HashSet<string>), true)]
+    public async Task Collection_CyclePolicy_Should_KeepOnlyProvenPayloadFastPaths(Type type, bool expected)
+    {
+        // Act
+        bool actual = CanHaveCycles(type);
+
+        // Assert
+        await Assert.That(actual).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task Collection_WithInternalStorageCycle_Should_PreserveCycle()
+    {
+        // Arrange
+        CollectionWithStorage original = new();
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+
+        // Assert
+        await Assert.That(clone.Storage).IsNotSameReferenceAs(original.Storage);
+        await Assert.That(clone.Storage.References[0]).IsSameReferenceAs(clone.Storage.References);
+    }
+
+    [Test]
     public async Task ConcurrentDictionary_WithInternalCycle_Should_PreserveReferenceTracking()
     {
         // Arrange
@@ -56,6 +90,22 @@ public class CollectionTests
         await Assert.That(clone.ContainsKey("FIRST")).IsTrue();
         await Assert.That(original.Count).IsEqualTo(1);
         await Assert.That(clone.Count).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task DerivedList_WithInternalStorageCycle_Should_PreserveCycle()
+    {
+        // Arrange
+        DerivedListWithStorage original = new() { 1, 2 };
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+
+        // Assert
+        await Assert.That(clone).IsEquivalentTo(new[] { 1, 2 });
+        await Assert.That(clone.Storage).IsNotSameReferenceAs(original.Storage);
+        await Assert.That(clone.Storage.References[0]).IsSameReferenceAs(clone.Storage.References);
     }
 
     [Test]
@@ -78,13 +128,42 @@ public class CollectionTests
         await Assert.That(clone[clonedKey]).IsEqualTo(1);
     }
 
-    private static bool CanHaveCycles(Type type) => (bool)typeof(Code.FastClonerGenerator)
-        .GetMethod("CalculateCanHaveCycles", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
-        .Invoke(null, [type])!;
-
-    private sealed class CyclicDictionaryKey
+    [Test]
+    public async Task Dictionary_WithMaterializedViews_Should_BindViewsToClone()
     {
-        public required Dictionary<CyclicDictionaryKey, int> Owner { get; init; }
+        // Arrange
+        var original = Enumerable.Range(0, 100).ToDictionary(i => i, i => i);
+        var originalKeys = original.Keys;
+        var originalValues = original.Values;
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+        clone.Add(100, 100);
+
+        // Assert
+        await Assert.That(clone.Keys.Count).IsEqualTo(101);
+        await Assert.That(clone.Values.Count).IsEqualTo(101);
+        await Assert.That(originalKeys.Count).IsEqualTo(100);
+        await Assert.That(originalValues.Count).IsEqualTo(100);
+    }
+
+    [Test]
+    public async Task HashSet_WithComparerReferencingSet_Should_PreserveCycle()
+    {
+        // Arrange
+        OwnerComparer comparer = new();
+        HashSet<string> original = new(comparer) { "first" };
+        comparer.Owner = original;
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+
+        // Assert
+        await Assert.That(clone.Comparer).IsNotSameReferenceAs(comparer);
+        await Assert.That(((OwnerComparer)clone.Comparer).Owner).IsSameReferenceAs(clone);
+        await Assert.That(clone.Contains("FIRST")).IsTrue();
     }
 
     [Test]
@@ -335,6 +414,40 @@ public class CollectionTests
         await Assert.That(clone.Count).IsEqualTo(4);
         await Assert.That(original.Count).IsEqualTo(3);
         await Assert.That(original.Tag).IsEquivalentTo(new List<int> { 1, 2, 3 });
+    }
+
+    private sealed class CyclicStorage
+    {
+        public object[] References = new object[1];
+        public CyclicStorage() => References[0] = References;
+    }
+
+    private sealed class DerivedListWithStorage : List<int>
+    {
+        public CyclicStorage Storage = new();
+    }
+
+    private sealed class CollectionWithStorage : IEnumerable<int>
+    {
+        public CyclicStorage Storage = new();
+        public IEnumerator<int> GetEnumerator() => Enumerable.Empty<int>().GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class OwnerComparer : IEqualityComparer<string>
+    {
+        public HashSet<string>? Owner;
+        public bool Equals(string? x, string? y) => StringComparer.OrdinalIgnoreCase.Equals(x, y);
+        public int GetHashCode(string obj) => StringComparer.OrdinalIgnoreCase.GetHashCode(obj);
+    }
+
+    private static bool CanHaveCycles(Type type) => (bool)typeof(Code.FastClonerGenerator)
+        .GetMethod("CalculateCanHaveCycles", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(null, [type])!;
+
+    private sealed class CyclicDictionaryKey
+    {
+        public required Dictionary<CyclicDictionaryKey, int> Owner { get; init; }
     }
 }
 

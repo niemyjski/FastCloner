@@ -54,6 +54,9 @@ internal static class FastArrayCopy<T>
 
 internal static class FastClonerGenerator
 {
+    private static readonly Type DictionaryInterfaceDefinition = typeof(IDictionary<,>);
+    private static readonly Type EnumerableInterfaceDefinition = typeof(IEnumerable<>);
+
     private struct TypeCloneDispatchCache
     {
         private Type? typeA;
@@ -463,6 +466,19 @@ internal static class FastClonerGenerator
             return true;
         }
 
+        Type? payloadType = GetCollectionPayloadType(type);
+        if (payloadType is not null && IsKnownArrayBackedCollection(type))
+        {
+            bool payloadTriviallyAcyclic =
+                FastClonerSafeTypes.CanReturnSameObject(payloadType) ||
+                (payloadType.IsValueType && !ValueTypeContainsReferenceFieldsCached(payloadType));
+
+            if (payloadTriviallyAcyclic)
+            {
+                return ContainerHasStructMediatedSelfReference(type);
+            }
+        }
+
         Type[] fieldTypes = GetCycleFieldTypes(type);
         for (int i = 0; i < fieldTypes.Length; i++)
         {
@@ -480,6 +496,61 @@ internal static class FastClonerGenerator
         return false;
     }
     
+    private static bool ContainerHasStructMediatedSelfReference(Type rootType)
+    {
+        HashSet<Type> visited = [];
+        return HasStructMediatedSelfReferenceCore(rootType, rootType, visited);
+    }
+
+    private static bool HasStructMediatedSelfReferenceCore(Type current, Type rootType, HashSet<Type> visited)
+    {
+        if (!visited.Add(current))
+            return false;
+
+        Type[] fieldTypes = GetCycleFieldTypes(current);
+        for (int i = 0; i < fieldTypes.Length; i++)
+        {
+            Type fieldType = fieldTypes[i];
+
+            if (FastClonerSafeTypes.CanReturnSameObject(fieldType))
+                continue;
+
+            if (fieldType.IsValueType)
+            {
+                if (HasStructMediatedSelfReferenceCore(fieldType, rootType, visited))
+                    return true;
+                continue;
+            }
+
+            if (FieldTypeCouldReferenceRoot(fieldType, rootType))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool FieldTypeCouldReferenceRoot(Type fieldType, Type rootType)
+    {
+        if (fieldType == rootType ||
+            fieldType.IsAssignableFrom(rootType) ||
+            rootType.IsAssignableFrom(fieldType))
+        {
+            return true;
+        }
+
+        if (fieldType.IsArray)
+        {
+            Type? element = fieldType.GetElementType();
+            if (element is not null &&
+                (element == rootType || element.IsAssignableFrom(rootType) || rootType.IsAssignableFrom(element)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool ValueTypeContainsReferenceFields(Type valueType, HashSet<Type> visited)
     {
         if (!valueType.IsValueType || FastClonerSafeTypes.CanReturnSameObject(valueType))
@@ -523,6 +594,64 @@ internal static class FastClonerGenerator
     private static Type[] GetCycleFieldTypes(Type type)
     {
         return FastClonerExprGenerator.GetTypeShape(type).CycleFieldTypes;
+    }
+
+    private static bool IsKnownArrayBackedCollection(Type type)
+    {
+        // Payload safety is sufficient only for these exact array-backed shapes. Other collections
+        // can have cycles in keys, comparers, cached views, or internal storage; subclasses add state.
+        if (!type.IsGenericType)
+            return false;
+
+        Type definition = type.GetGenericTypeDefinition();
+        return definition == typeof(List<>) || definition == typeof(Queue<>) || definition == typeof(Stack<>);
+    }
+
+    private static Type? GetCollectionPayloadType(Type type)
+    {
+        return FastClonerCache.GetOrAddCollectionPayloadType(type, ResolveCollectionPayloadType);
+    }
+
+    private static Type? ResolveCollectionPayloadType(Type type)
+    {
+        if (TryGetGenericInterfaceArgument(type, DictionaryInterfaceDefinition, 1, out Type? dictionaryValueType))
+            return dictionaryValueType;
+
+        if (TryGetGenericInterfaceArgument(type, EnumerableInterfaceDefinition, 0, out Type? enumerableElementType))
+            return enumerableElementType;
+
+        return null;
+    }
+
+    private static bool TryGetGenericInterfaceArgument(Type type, Type genericInterfaceDefinition, int argIndex, out Type? argument)
+    {
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == genericInterfaceDefinition)
+        {
+            Type[] args = type.GetGenericArguments();
+            if ((uint)argIndex < (uint)args.Length)
+            {
+                argument = args[argIndex];
+                return true;
+            }
+        }
+
+        Type[] interfaces = type.GetInterfaces();
+        for (int i = 0; i < interfaces.Length; i++)
+        {
+            Type current = interfaces[i];
+            if (!current.IsGenericType || current.GetGenericTypeDefinition() != genericInterfaceDefinition)
+                continue;
+
+            Type[] args = current.GetGenericArguments();
+            if ((uint)argIndex < (uint)args.Length)
+            {
+                argument = args[argIndex];
+                return true;
+            }
+        }
+
+        argument = null;
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

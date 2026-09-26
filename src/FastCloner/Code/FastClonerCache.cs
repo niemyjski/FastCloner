@@ -216,6 +216,7 @@ internal static class FastClonerCache
         public readonly ClrCache<bool> StableHashSemanticsCache = new ClrCache<bool>();
         public readonly ClrCache<bool> CanHaveCyclesCache = new ClrCache<bool>();
         public readonly ClrCache<bool> ValueTypeContainsReferencesCache = new ClrCache<bool>();
+        public readonly ClrCache<Type?> CollectionPayloadTypeCache = new ClrCache<Type?>();
         public readonly ClrCache<bool> CompilerGeneratedTypeCache = new ClrCache<bool>();
     }
 
@@ -244,6 +245,7 @@ internal static class FastClonerCache
     public static bool GetOrAddStableHashSemantics(Type type, Func<Type, bool> valueFactory) => cacheStore.StableHashSemanticsCache.GetOrAdd(type, valueFactory);
     public static bool GetOrAddCanHaveCycles(Type type, Func<Type, bool> valueFactory) => cacheStore.CanHaveCyclesCache.GetOrAdd(type, valueFactory);
     public static bool GetOrAddValueTypeContainsReferences(Type type, Func<Type, bool> valueFactory) => cacheStore.ValueTypeContainsReferencesCache.GetOrAdd(type, valueFactory);
+    public static Type? GetOrAddCollectionPayloadType(Type type, Func<Type, Type?> valueFactory) => cacheStore.CollectionPayloadTypeCache.GetOrAdd(type, valueFactory);
     public static bool GetOrAddCompilerGeneratedType(Type type, Func<Type, bool> valueFactory) => cacheStore.CompilerGeneratedTypeCache.GetOrAdd(type, valueFactory);
     
     /// <summary>
