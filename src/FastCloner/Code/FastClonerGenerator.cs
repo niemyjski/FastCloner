@@ -943,7 +943,6 @@ internal static class FastClonerGenerator
         T[] outArray = FastArrayCopy<T>.Clone(obj);
         if (state.TrackReferences)
         {
-            state.EnsureKnownRefCapacity(outArray.Length + 1);
             state.AddKnownRef(obj, outArray);
         }
         return outArray;
