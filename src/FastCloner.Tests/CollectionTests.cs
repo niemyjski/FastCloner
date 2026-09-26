@@ -39,6 +39,55 @@ public class StringSet : ISet<string>
 public class CollectionTests
 {
     [Test]
+    public async Task ConcurrentDictionary_WithInternalCycle_Should_PreserveReferenceTracking()
+    {
+        // Arrange
+        ConcurrentDictionary<string, DateTime?> original = new(StringComparer.OrdinalIgnoreCase);
+        original["first"] = null;
+        // Check the classifier first so a regression fails instead of overflowing the test process.
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+        clone["second"] = null;
+
+        // Assert
+        await Assert.That(clone).IsNotSameReferenceAs(original);
+        await Assert.That(clone.ContainsKey("FIRST")).IsTrue();
+        await Assert.That(original.Count).IsEqualTo(1);
+        await Assert.That(clone.Count).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Dictionary_WithKeyReferencingDictionary_Should_PreserveCycle()
+    {
+        // Arrange
+        Dictionary<CyclicDictionaryKey, int> original = new();
+        CyclicDictionaryKey key = new() { Owner = original };
+        original[key] = 1;
+        await Assert.That(CanHaveCycles(original.GetType())).IsTrue();
+
+        // Act
+        var clone = original.DeepClone();
+        var clonedKey = clone.Keys.Single();
+
+        // Assert
+        await Assert.That(clone).IsNotSameReferenceAs(original);
+        await Assert.That(clonedKey).IsNotSameReferenceAs(key);
+        await Assert.That(clonedKey.Owner).IsSameReferenceAs(clone);
+        await Assert.That(clone[clonedKey]).IsEqualTo(1);
+    }
+
+    private static bool CanHaveCycles(Type type) => (bool)typeof(Code.FastClonerGenerator)
+        .GetMethod("CalculateCanHaveCycles", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+        .Invoke(null, [type])!;
+
+    private sealed class CyclicDictionaryKey
+    {
+        public required Dictionary<CyclicDictionaryKey, int> Owner { get; init; }
+    }
+
+    [Test]
     public async Task PriorityQueue_Should_Be_Deep_Cloned_Correctly()
     {
         PriorityQueue<string, int> original = new PriorityQueue<string, int>();
