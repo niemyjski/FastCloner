@@ -249,7 +249,7 @@ jobs:
         retention-days: 30
 
     - name: Upsert pull request benchmark comment
-      if: steps.run_gate.outputs.should_run == 'true' && github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest' && github.event.pull_request.head.repo.full_name == github.repository
+      if: steps.run_gate.outputs.should_run == 'true' && github.event_name == 'pull_request' && matrix.os == 'ubuntu-latest'
       shell: pwsh
       env:
         GH_TOKEN: ${{ github.token }}
