@@ -58,6 +58,25 @@ public class CollectionTests
     }
 
     [Test]
+    public async Task Collection_CyclePolicy_Should_NotCachePayloadForUnsupportedShape()
+    {
+        // Arrange
+        Type type = typeof(PayloadLookupCollection);
+        bool payloadFactoryCalled = false;
+
+        // Act
+        CanHaveCycles(type);
+        Code.FastClonerCache.GetOrAddCollectionPayloadType(type, _ =>
+        {
+            payloadFactoryCalled = true;
+            return typeof(int);
+        });
+
+        // Assert
+        await Assert.That(payloadFactoryCalled).IsTrue();
+    }
+
+    [Test]
     public async Task Collection_WithInternalStorageCycle_Should_PreserveCycle()
     {
         // Arrange
@@ -430,6 +449,12 @@ public class CollectionTests
     private sealed class CollectionWithStorage : IEnumerable<int>
     {
         public CyclicStorage Storage = new();
+        public IEnumerator<int> GetEnumerator() => Enumerable.Empty<int>().GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class PayloadLookupCollection : IEnumerable<int>
+    {
         public IEnumerator<int> GetEnumerator() => Enumerable.Empty<int>().GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }

@@ -466,8 +466,8 @@ internal static class FastClonerGenerator
             return true;
         }
 
-        Type? payloadType = GetCollectionPayloadType(type);
-        if (payloadType is not null && IsKnownArrayBackedCollection(type))
+        Type? payloadType = IsKnownArrayBackedCollection(type) ? GetCollectionPayloadType(type) : null;
+        if (payloadType is not null)
         {
             bool payloadTriviallyAcyclic =
                 FastClonerSafeTypes.CanReturnSameObject(payloadType) ||
